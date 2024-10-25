@@ -38,4 +38,4 @@ jobs:
           git add .
           pr_title="Update FAQ - $(date +'%Y-%m-%d')"
           git switch -c "update_faq/$(date +'%Y-%m-%d')"
-          git diff --staged --exit-code || (git commit -m "$pr_title" && git push)
+          git diff --staged --exit-code || (git commit -m "$pr_title" && git push --set-upstream origin "update_faq/$(date +'%Y-%m-%d')")
