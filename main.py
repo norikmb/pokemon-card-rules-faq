@@ -41,7 +41,6 @@ def get_faq_from_page(page_num: int) -> list[Faq]:
 
 
 def main():
-
     url = "https://www.pokemon-card.com/rules/faq/search.php?ses=1&page=1"
     response = request.urlopen(url)
 

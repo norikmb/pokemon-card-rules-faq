@@ -7,6 +7,8 @@ on:
 
 jobs:
   update_faq:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
 
     steps:
@@ -41,5 +43,3 @@ jobs:
             pr_title="Update FAQ Data - $(date +'%Y-%m-%d')"
             gh pr create --title "$pr_title" --body "" || echo "Failed to create PR."
           fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
