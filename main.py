@@ -17,6 +17,7 @@ class Faq:
 def get_total_pages(soup: BeautifulSoup) -> int:
     all_num_text = soup.select_one(".AllNum").get_text(strip=True)
     total_pages = all_num_text.split("/")[-1]
+    total_pages = 2
     return int(total_pages)
 
 
