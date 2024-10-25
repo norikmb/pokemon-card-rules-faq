@@ -1,0 +1,45 @@
+name: Update FAQ Data
+
+on:
+  schedule:
+    - cron: "0 16 * * 5" # 毎週金曜日の午後4時（16:00）
+  workflow_dispatch: # 手動トリガー
+
+jobs:
+  update_faq:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.8"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run FAQ update script
+        run: poetry run python main.py
+
+      - name: Create Pull Request if changes were made
+        run: |
+          git config --local user.name "Your Name"  # Gitのユーザー名を設定
+          git config --local user.email "your-email@example.com"  # Gitのメールアドレスを設定
+          if ! git diff --quiet; then
+            git add faq_data.json
+            git commit -m "Update FAQ data at $(date +'%Y-%m-%d')"
+            branch_hash=$(echo "$(date +%s)" | sha256sum | cut -d' ' -f1)
+            git push origin HEAD:refs/heads/update-faq-$branch_hash
+            pr_title="Update FAQ Data - $(date +'%Y-%m-%d')"
+            gh pr create --title "$pr_title" --body "" || echo "Failed to create PR."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
