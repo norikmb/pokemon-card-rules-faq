@@ -40,6 +40,6 @@ jobs:
           branch="update_faq/$(date +'%Y-%m-%d')"
           git switch -c ${branch}
           git diff --staged --exit-code || (git commit -m "feat: ${title}" && git push --set-upstream origin ${branch})
-          gh api --method POST -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" /norikmb/pokemon-card-rules-faq/pulls -f "title=${title}" -f "body=''" -f "head=${branch}" -f "base=main"
+          gh api --method POST -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/norikmb/pokemon-card-rules-faq/pulls -f "title=${title}" -f "body=''" -f "head=${branch}" -f "base=main"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
