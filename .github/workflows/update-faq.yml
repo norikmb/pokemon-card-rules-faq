@@ -1,4 +1,4 @@
-name: Update FAQ Data
+name: Update FAQ
 
 on:
   schedule:
@@ -40,7 +40,7 @@ jobs:
           title="UpdateFAQ$(date +'%Y-%m-%d')"
           branch="update_faq/$(date +'%Y-%m-%d')"
           git switch -c ${branch}
-          git diff --staged --exit-code || (git commit -m "feat: ${title}" && git push --set-upstream origin ${branch})
+          git commit --allow-empty -m "feat: ${title}" && git push --set-upstream origin ${branch}
           gh pr create --base main --head ${branch} --title ${title} --body ""
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
