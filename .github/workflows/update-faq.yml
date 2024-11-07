@@ -2,7 +2,7 @@ name: Update FAQ
 
 on:
   schedule:
-    - cron: "0 16 * * 5" # 毎週金曜日の午後4時（16:00）
+    - cron: "0 7 * * 5" # 毎週金曜日の午後4時（16:00）
   workflow_dispatch: # 手動トリガー
 
 jobs:
@@ -39,6 +39,7 @@ jobs:
           git add .
           title="UpdateFAQ$(date +'%Y-%m-%d')"
           branch="update_faq/$(date +'%Y-%m-%d')"
+          git diff --name-only --exit-code
           git switch -c ${branch}
           git commit --allow-empty -m "feat: ${title}" && git push --set-upstream origin ${branch}
           gh pr create --base main --head ${branch} --title ${title} --body ""
