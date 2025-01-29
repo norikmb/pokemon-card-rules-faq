@@ -33,9 +33,13 @@ jobs:
       - name: Run FAQ update script
         run: poetry run python main.py
 
+      - name: Run git diff
+        id: diff
+        run: git diff --name-only --exit-code
+        continue-on-error: true
+
       - name: Create Pull Request
         run: |
-          git diff --name-only --exit-code
           git config --local user.name "マシンユーザー"
           git config --local user.email "machine-user@example.com"
           git add .
