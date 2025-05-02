@@ -35,14 +35,21 @@ jobs:
 
       - name: Run git diff
         id: diff
-        run: git diff --name-only --exit-code
+        run: |
+          git config --local user.name "マシンユーザー"
+          git config --local user.email "machine-user@example.com"
+          git add faq_data.json
+          git diff --name-only --exit-code
         continue-on-error: true
 
       - name: Create Pull Request
         run: |
-          git config --local user.name "マシンユーザー"
-          git config --local user.email "machine-user@example.com"
-          git add .
+          if [[ "${{ steps.diff.outputs.exit_code }}" -ne 0 ]]; then
+            echo "Changes detected, creating a pull request."
+          else
+            echo "No changes detected, skipping pull request creation."
+            exit 0
+          fi
           title="UpdateFAQ$(date +'%Y-%m-%d')"
           branch="update_faq/$(date +'%Y-%m-%d')"
           git switch -c ${branch}
