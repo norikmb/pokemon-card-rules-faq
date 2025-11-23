@@ -42,11 +42,55 @@ jobs:
           git diff --name-only --exit-code
 
       - name: Create Pull Request
+        id: create_pr
         run: |
+          set -euo pipefail
           title="UpdateFAQ$(date +'%Y-%m-%d')"
           branch="update_faq/$(date +'%Y-%m-%d')"
           git switch -c ${branch}
           git commit --allow-empty -m "feat: ${title}" && git push --set-upstream origin ${branch}
-          gh pr create --base main --head ${branch} --title ${title} --body ""
+          # Create PR and output its number and branch as step outputs
+          pr_json=$(gh pr create --base main --head ${branch} --title "${title}" --body "" --json number,url)
+          pr_number=$(echo "$pr_json" | jq -r '.number')
+          echo "pr_number=$pr_number" >> $GITHUB_OUTPUT
+          echo "pr_branch=${branch}" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-merge PR when opened
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Use the PR number and branch emitted by the previous `create_pr` step
+            const prNumber = Number(process.env.PR_NUMBER || 0);
+            const headRef = process.env.PR_BRANCH || '';
+            if (!prNumber) {
+              console.log('No PR number available from previous step. Skipping auto-merge.');
+              return;
+            }
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            // Only auto-merge PRs created by the Update FAQ job (branches starting with `update_faq/`)
+            if (!headRef.startsWith('update_faq/')) {
+              console.log(`Skipping PR #${prNumber} because head.ref=${headRef}`);
+              return;
+            }
+
+            let pr = (await github.rest.pulls.get({ owner, repo, pull_number: prNumber })).data;
+            // Wait up to ~20s for GitHub to compute `mergeable` (it may be null initially)
+            let attempts = 0;
+            while (pr.mergeable === null && attempts < 10) {
+              await new Promise(r => setTimeout(r, 2000));
+              pr = (await github.rest.pulls.get({ owner, repo, pull_number: prNumber })).data;
+              attempts++;
+            }
+            if (pr.mergeable) {
+              await github.rest.pulls.merge({ owner, repo, pull_number: prNumber, merge_method: "merge" });
+              console.log(`Merged PR #${prNumber}`);
+            } else {
+              console.log(`PR #${prNumber} is not mergeable (mergeable=${pr.mergeable}). Skipping.`);
+            }
+        env:
+          PR_NUMBER: ${{ steps.create_pr.outputs.pr_number }}
+          PR_BRANCH: ${{ steps.create_pr.outputs.pr_branch }}
