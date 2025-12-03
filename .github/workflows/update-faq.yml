@@ -22,43 +22,78 @@ jobs:
           python-version: "3.13"
           architecture: "x64"
 
-      - name: Install Poetry
+      - name: Install uv
         run: |
-          curl -sSL https://install.python-poetry.org | python3 - --version 1.8.5
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
-        run: poetry install
+        run: uv sync
 
       - name: Run FAQ update script
-        run: poetry run python main.py
+        run: uv run python main.py
 
-      - name: Run git diff
-        id: diff
+      - name: Check for changes
+        id: check_changes
         run: |
           git config --local user.name "マシンユーザー"
           git config --local user.email "machine-user@example.com"
-          git add faq_data.json
-          git diff --name-only --exit-code
+          git add faq_data.json diff_report.json
+          if git diff --staged --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "変更はありませんでした"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "変更が検出されました"
+          fi
+
+      - name: Generate PR body
+        id: pr_body
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          if [ -f diff_report.json ]; then
+            echo "📊 FAQ更新レポート" > pr_body.txt
+            echo "" >> pr_body.txt
+            echo "## 変更サマリー" >> pr_body.txt
+            echo "" >> pr_body.txt
+            added=$(jq -r '.summary.added' diff_report.json)
+            removed=$(jq -r '.summary.removed' diff_report.json)
+            modified=$(jq -r '.summary.modified' diff_report.json)
+            total=$(jq -r '.summary.total_new' diff_report.json)
+            echo "- 新規追加: ${added} 件" >> pr_body.txt
+            echo "- 削除: ${removed} 件" >> pr_body.txt
+            echo "- 変更: ${modified} 件" >> pr_body.txt
+            echo "- 合計: ${total} 件" >> pr_body.txt
+            echo "" >> pr_body.txt
+            echo "---" >> pr_body.txt
+            echo "" >> pr_body.txt
+            echo "🤖 このPRは自動生成されました" >> pr_body.txt
+            cat pr_body.txt
+          else
+            echo "FAQ更新" > pr_body.txt
+          fi
 
       - name: Create Pull Request
         id: create_pr
+        if: steps.check_changes.outputs.has_changes == 'true'
         run: |
           set -euo pipefail
-          title="UpdateFAQ$(date +'%Y-%m-%d')"
+          title="feat: UpdateFAQ $(date +'%Y-%m-%d')"
           branch="update_faq/$(date +'%Y-%m-%d')"
           git switch -c ${branch}
-          git commit --allow-empty -m "feat: ${title}" && git push --set-upstream origin ${branch}
+          git commit -m "${title}" && git push --set-upstream origin ${branch}
           # Create PR and output its number and branch as step outputs
-          pr_url=$(gh pr create --base main --head ${branch} --title "${title}" --body "")
+          pr_url=$(gh pr create --base main --head ${branch} --title "${title}" --body-file pr_body.txt)
           pr_number=$(echo "$pr_url" | grep -oP '(?<=pull/)\d+')
           echo "pr_number=$pr_number" >> $GITHUB_OUTPUT
           echo "pr_branch=${branch}" >> $GITHUB_OUTPUT
+          echo "Created PR #${pr_number}: ${pr_url}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Auto-merge PR when opened
         uses: actions/github-script@v6
+        if: steps.check_changes.outputs.has_changes == 'true'
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -77,6 +112,7 @@ jobs:
               return;
             }
 
+            console.log(`Waiting for PR #${prNumber} to be ready for merge...`);
             let pr = (await github.rest.pulls.get({ owner, repo, pull_number: prNumber })).data;
             // Wait up to ~20s for GitHub to compute `mergeable` (it may be null initially)
             let attempts = 0;
@@ -87,10 +123,15 @@ jobs:
             }
             if (pr.mergeable) {
               await github.rest.pulls.merge({ owner, repo, pull_number: prNumber, merge_method: "merge" });
-              console.log(`Merged PR #${prNumber}`);
+              console.log(`✅ Successfully merged PR #${prNumber}`);
             } else {
-              console.log(`PR #${prNumber} is not mergeable (mergeable=${pr.mergeable}). Skipping.`);
+              console.log(`❌ PR #${prNumber} is not mergeable (mergeable=${pr.mergeable}). Skipping.`);
             }
         env:
           PR_NUMBER: ${{ steps.create_pr.outputs.pr_number }}
           PR_BRANCH: ${{ steps.create_pr.outputs.pr_branch }}
+
+      - name: No changes detected
+        if: steps.check_changes.outputs.has_changes == 'false'
+        run: |
+          echo "ℹ️ 前回から変更はありませんでした"
