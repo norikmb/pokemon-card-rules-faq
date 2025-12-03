@@ -31,7 +31,7 @@ jobs:
         run: uv sync
 
       - name: Run FAQ update script
-        run: uv run python main.py
+        run: uv run python src/main.py
 
       - name: Check for changes
         id: check_changes
