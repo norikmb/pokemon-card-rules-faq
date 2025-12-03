@@ -50,8 +50,8 @@ jobs:
           git switch -c ${branch}
           git commit --allow-empty -m "feat: ${title}" && git push --set-upstream origin ${branch}
           # Create PR and output its number and branch as step outputs
-          pr_json=$(gh pr create --base main --head ${branch} --title "${title}" --body "" --json number,url)
-          pr_number=$(echo "$pr_json" | jq -r '.number')
+          pr_url=$(gh pr create --base main --head ${branch} --title "${title}" --body "")
+          pr_number=$(echo "$pr_url" | grep -oP '(?<=pull/)\d+')
           echo "pr_number=$pr_number" >> $GITHUB_OUTPUT
           echo "pr_branch=${branch}" >> $GITHUB_OUTPUT
         env:
