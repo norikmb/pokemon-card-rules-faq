@@ -24,7 +24,7 @@ cd pokemon-card-rules-faq
 uv sync
 
 # スクリプトを実行
-uv run python main.py
+uv run python src/main.py
 ```
 
 ## セットアップ（uv）
@@ -34,7 +34,7 @@ uv run python main.py
 uv sync
 
 # FAQ 取得を実行
-uv run python main.py
+uv run python src/main.py
 
 # テスト / リント
 uv run pytest -v
@@ -46,19 +46,24 @@ uv run ruff format .
 
 ```
 pokemon-card-rules-faq/
-├── main.py              # メインスクリプト
-├── config.py            # 設定ファイル
-├── faq_data.json        # FAQ データ（自動生成）
-├── diff_report.json     # 差分レポート（自動生成）
-├── faq_update.log       # ログファイル（自動生成）
+├── src/
+│   ├── main.py          # メインスクリプト
+│   ├── config.py        # 設定ファイル
+│   └── doc.md           # 詳細ドキュメント
 ├── tests/               # テストコード
 │   ├── test_main.py
 │   └── fixtures/
 ├── .github/
 │   └── workflows/
 │       ├── update-faq.yml    # FAQ自動更新ワークフロー
+│       ├── test.yml          # テストワークフロー
 │       └── ruff-action.yml   # コード品質チェック
+├── faq_data.json        # FAQ データ（自動生成）
+├── diff_report.json     # 差分レポート（自動生成）
+├── faq_update.log       # ログファイル（自動生成）
 ├── pyproject.toml       # プロジェクト設定
+├── Makefile             # ビルドタスク
+├── .gitignore           # Git除外設定
 └── README.md
 ```
 
@@ -68,7 +73,7 @@ pokemon-card-rules-faq/
 
 ```bash
 # FAQ データを取得
-uv run python main.py
+uv run python src/main.py
 
 # テストを実行
 uv run pytest

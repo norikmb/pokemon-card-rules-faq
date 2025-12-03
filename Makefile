@@ -31,7 +31,7 @@ clean: ## 一時ファイルを削除
 	find . -type f -name "*.pyc" -delete
 
 run: ## FAQスクリプトを実行
-	uv run python main.py
+	uv run python src/main.py
 
 pre-commit-install: ## pre-commitフックをインストール
 	uv run pre-commit install
