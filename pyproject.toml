@@ -2,7 +2,7 @@
 name = "pokemon-card-rules-faq"
 version = "0.0.0"
 description = "Pokemon card rules FAQ scraper and diff reporter"
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 dependencies = [
     "bs4>=0.0.2",
     "pydantic>=2.0.0",
@@ -47,7 +47,7 @@ exclude_lines = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = [

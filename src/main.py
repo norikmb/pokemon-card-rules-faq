@@ -24,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(slots=True)
 class Faq:
     question_hash: str
     question: str
@@ -113,10 +113,9 @@ def load_existing_data() -> list[dict]:
     output_path = Path(config.OUTPUT_FILE)
     if output_path.exists():
         try:
-            with open(output_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                logger.info(f"既存データを読み込みました: {len(data)} 件")
-                return data
+            data = json.loads(output_path.read_text(encoding="utf-8"))
+            logger.info(f"既存データを読み込みました: {len(data)} 件")
+            return data
         except json.JSONDecodeError as e:
             logger.warning(f"既存データの読み込みに失敗: {e}")
             return []
@@ -164,8 +163,10 @@ def generate_diff_report(old_data: list[dict], new_data: list[dict]) -> dict:
 def save_diff_report(report: dict) -> None:
     """差分レポートをファイルに保存"""
     try:
-        with open(config.DIFF_REPORT_FILE, "w", encoding="utf-8") as f:
-            json.dump(report, f, ensure_ascii=False, indent=2)
+        Path(config.DIFF_REPORT_FILE).write_text(
+            json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         logger.info(f"差分レポートを保存: {config.DIFF_REPORT_FILE}")
     except Exception as e:
         logger.error(f"差分レポートの保存に失敗: {e}")
@@ -204,8 +205,10 @@ def main():
         save_diff_report(diff_report)
 
         # データ保存
-        with open(config.OUTPUT_FILE, "w", encoding="utf-8") as json_file:
-            json.dump(new_data, json_file, ensure_ascii=False, indent=4)
+        Path(config.OUTPUT_FILE).write_text(
+            json.dumps(new_data, ensure_ascii=False, indent=4),
+            encoding="utf-8",
+        )
 
         logger.info(f"FAQデータを保存: {config.OUTPUT_FILE}")
         logger.info("FAQ更新処理が正常に完了しました")
