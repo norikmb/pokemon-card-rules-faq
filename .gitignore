@@ -1,0 +1,29 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Environments
+.venv/
+venv/
+
+# Packaging
+*.egg-info/
+*.egg
+*.eggs/
+
+# Test/coverage
+.pytest_cache/
+.coverage*
+htmlcov/
+
+# Ruff
+.ruff_cache/
+
+# Logs
+*.log
+
+# Editor/OS
+.DS_Store
+Thumbs.db
