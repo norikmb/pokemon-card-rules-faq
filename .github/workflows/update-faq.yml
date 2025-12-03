@@ -92,7 +92,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Auto-merge PR when opened
-        uses: actions/github-script@v6
+        uses: actions/github-script@v8
         if: steps.check_changes.outputs.has_changes == 'true'
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
