@@ -2,11 +2,13 @@ import hashlib
 import json
 import logging
 import random
+import re
 import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib import error, request
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup
 
@@ -37,22 +39,94 @@ class ScraperError(Exception):
     pass
 
 
+def is_busy_page(soup: BeautifulSoup) -> bool:
+    """アクセス集中エラーページかどうかを判定"""
+    page_text = soup.get_text(" ", strip=True)
+    return "アクセスが集中" in page_text
+
+
+def build_faq_page_url(page_num: int) -> str:
+    """FAQ一覧URLをページ番号付きで構築"""
+    parsed = urlsplit(config.BASE_URL)
+    query_params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query_params["page"] = str(page_num)
+    new_query = urlencode(query_params)
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment)
+    )
+
+
 def get_total_pages(soup: BeautifulSoup) -> int:
     """総ページ数を取得"""
     try:
-        all_num_text = soup.select_one(".AllNum").get_text(strip=True)
-        total_pages = all_num_text.split("/")[-1]
-        pages = int(total_pages)
-        logger.info(f"総ページ数: {pages}")
-        return pages
+        all_num_element = soup.select_one(".AllNum")
+        if all_num_element:
+            all_num_text = all_num_element.get_text(strip=True)
+            total_pages = all_num_text.split("/")[-1]
+            pages = int(total_pages)
+            logger.info(f"総ページ数: {pages}")
+            return pages
+
+        page_text = soup.get_text(" ", strip=True)
+        slash_pattern_match = re.search(r"\b\d+\s*/\s*(\d+)\b", page_text)
+        if slash_pattern_match:
+            pages = int(slash_pattern_match.group(1))
+            logger.info(f"総ページ数(フォールバック): {pages}")
+            return pages
+
+        page_links = soup.select('a[href*="page="]')
+        page_numbers: list[int] = []
+        for link in page_links:
+            href = link.get("href", "")
+            link_match = re.search(r"(?:\?|&)page=(\d+)", href)
+            if link_match:
+                page_numbers.append(int(link_match.group(1)))
+
+        if page_numbers:
+            pages = max(page_numbers)
+            logger.info(f"総ページ数(リンク解析): {pages}")
+            return pages
+
+        raise ValueError("総ページ数に該当する要素が見つかりません")
+
     except (AttributeError, ValueError, IndexError) as e:
         logger.error(f"総ページ数の取得に失敗: {e}")
         raise ScraperError(f"総ページ数の取得に失敗: {e}") from e
 
 
+def fetch_soup(url: str, target_name: str, retry_count: int = 0) -> BeautifulSoup:
+    """URLからBeautifulSoupを取得（リトライ機能付き）"""
+    try:
+        response = request.urlopen(url, timeout=config.REQUEST_TIMEOUT)
+        soup = BeautifulSoup(response, "html.parser")
+        response.close()
+
+        if is_busy_page(soup):
+            raise error.URLError("アクセス集中エラーページを受信")
+
+        return soup
+
+    except error.URLError as e:
+        if retry_count < config.MAX_RETRIES:
+            retry_delay = config.RETRY_DELAY * (retry_count + 1)
+            logger.warning(
+                f"{target_name} の取得に失敗。{retry_delay}秒後にリトライします... "
+                f"(試行 {retry_count + 1}/{config.MAX_RETRIES}): {e}"
+            )
+            time.sleep(retry_delay)
+            return fetch_soup(url, target_name, retry_count + 1)
+
+        logger.error(f"{target_name} の取得に {config.MAX_RETRIES} 回失敗しました: {e}")
+        raise ScraperError(f"{target_name} の取得に失敗: {e}") from e
+
+    except Exception as e:
+        logger.error(f"{target_name} の処理中に予期しないエラー: {e}")
+        raise ScraperError(f"{target_name} の処理中にエラー: {e}") from e
+
+
 def get_faq_from_page(page_num: int, retry_count: int = 0) -> list[Faq]:
     """指定ページのFAQを取得（リトライ機能付き）"""
-    url = f"{config.BASE_URL}?ses=1&page={page_num}"
+    url = build_faq_page_url(page_num)
 
     try:
         # サーバーへの負荷を考慮した待機
@@ -60,9 +134,9 @@ def get_faq_from_page(page_num: int, retry_count: int = 0) -> list[Faq]:
         time.sleep(wait_time)
 
         logger.debug(f"ページ {page_num} を取得中... (URL: {url})")
-        response = request.urlopen(url, timeout=config.REQUEST_TIMEOUT)
-        soup = BeautifulSoup(response, "html.parser")
-        response.close()
+        soup = fetch_soup(
+            url=url, target_name=f"ページ {page_num}", retry_count=retry_count
+        )
 
         faq_items = soup.select(".FAQResultList_item")
         if not faq_items:
@@ -180,11 +254,9 @@ def main():
         old_data = load_existing_data()
 
         # 初回ページの取得
-        url = f"{config.BASE_URL}?ses=1&page=1"
+        url = build_faq_page_url(1)
         logger.info(f"初回ページを取得中: {url}")
-        response = request.urlopen(url, timeout=config.REQUEST_TIMEOUT)
-        soup = BeautifulSoup(response, "html.parser")
-        response.close()
+        soup = fetch_soup(url=url, target_name="初回ページ")
 
         # 全FAQを取得
         all_faq_list: list[Faq] = []
