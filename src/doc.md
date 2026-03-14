@@ -138,3 +138,36 @@ uv run ruff check
 ```bash
 make pre-commit-install
 ```
+
+## ブログ用Markdown生成
+
+差分が発生した場合、`diff_report.json` からブログにコピペしやすい `blog_post.md` を生成します。
+投稿は自動で行わず、手動コピペ前提です。
+
+### 出力ファイル
+
+- 差分JSON: `diff_report.json`
+- コピペ用Markdown: `blog_post.md`
+
+### 投稿タイトル案
+
+投稿タイトルは次の形式でログ出力されます。
+
+- `YYYY/MM/DD ポケモンカードQ&Aサイレント修正一覧`
+
+### 投稿文の冒頭文
+
+直近 7 日以内に発売された拡張パック・構築デッキがある場合、その商品名と発売日を冒頭に記載します。
+該当商品がない場合は「今週更新されたQ&Aをまとめています。」という文言になります。
+
+複数商品が直近にある場合は、冒頭文にすべて列挙します。
+
+### GitHub Actions
+
+`Update FAQ` ワークフロー内の `update_faq` ジョブで差分生成と `blog_post.md` 生成を行います。
+差分がある場合は PR に `faq_data.json` / `diff_report.json` / `blog_post.md` が含まれます。
+
+### ローカル実行
+
+- FAQ更新からまとめて生成: `make run`
+- 差分JSONからMarkdownのみ生成: `make run-blog-md`

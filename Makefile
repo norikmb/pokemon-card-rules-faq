@@ -33,6 +33,9 @@ clean: ## 一時ファイルを削除
 run: ## FAQスクリプトを実行
 	uv run python src/main.py
 
+run-blog-md: ## 差分レポートからブログ用Markdownのみ生成
+	uv run python src/generate_blog_md_from_diff.py
+
 pre-commit-install: ## pre-commitフックをインストール
 	uv run pre-commit install
 

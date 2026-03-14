@@ -7,6 +7,8 @@ on:
 
 jobs:
   update_faq:
+    outputs:
+      has_changes: ${{ steps.check_changes.outputs.has_changes }}
     permissions:
       contents: write
       pull-requests: write
@@ -39,6 +41,9 @@ jobs:
           git config --local user.name "マシンユーザー"
           git config --local user.email "machine-user@example.com"
           git add faq_data.json diff_report.json
+          if [ -f blog_post.md ]; then
+            git add blog_post.md
+          fi
           if git diff --staged --quiet; then
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "変更はありませんでした"

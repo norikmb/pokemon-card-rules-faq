@@ -1,8 +1,18 @@
 """スクレイピング機能のテスト"""
 
+import json
+from datetime import datetime
+from unittest.mock import MagicMock, patch
+
 import pytest
 from bs4 import BeautifulSoup
 
+from blog_markdown import (
+    build_diff_markdown,
+    fetch_latest_relevant_product,
+    fetch_recent_relevant_products,
+    has_diff,
+)
 from main import (
     Faq,
     ScraperError,
@@ -161,3 +171,267 @@ def test_generate_diff_report_with_modifications():
     assert len(report["modified"]) == 1
     assert report["modified"][0]["old_answer"] == "A1"
     assert report["modified"][0]["new_answer"] == "A1 (updated)"
+
+
+def _make_products_html(entries: list[tuple[str, str]]) -> bytes:
+    """商品ページのモックHTMLを生成する。
+    entries: [(product_name, date_text), ...]
+      date_text 例: "2026年 3月13日（金）"
+    """
+    items = ""
+    for name, date_text in entries:
+        items += f"""
+        <div class="item">
+          <p class="name">{name}</p>
+          <p class="detail">拡張パック販売日{date_text}希望小売価格180円（税込）</p>
+        </div>
+        """
+    return f"<html><body>{items}</body></html>".encode("utf-8")
+
+
+def _mock_urlopen(html_bytes: bytes) -> MagicMock:
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = html_bytes
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    return mock_resp
+
+
+def test_fetch_recent_relevant_products_from_top_list_api_json():
+    """topList.php(JSON)から直近の拡張パック/構築デッキを取得できる"""
+    today = datetime(2026, 3, 14)
+    payload = {
+        "result": 1,
+        "products": [
+            {
+                "productTitle": "拡張パック 「ニンジャスピナー」",
+                "productType": "拡張パック",
+                "releaseDate": "2026年 3月13日（金）",
+            },
+            {
+                "productTitle": "スターターセットMEGA メガゲンガーex",
+                "productType": "構築デッキ",
+                "releaseDate": "2026年 3月12日（木）",
+            },
+            {
+                "productTitle": "カードイラストフィギュアコレクション",
+                "productType": "その他の商品",
+                "releaseDate": "2026年 3月13日（金）",
+            },
+        ],
+    }
+    response_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    with patch(
+        "blog_markdown.request.urlopen",
+        return_value=_mock_urlopen(response_bytes),
+    ):
+        result = fetch_recent_relevant_products(today)
+
+    assert result == [
+        ("ニンジャスピナー", datetime(2026, 3, 13)),
+        ("スターターセットMEGA メガゲンガーex", datetime(2026, 3, 12)),
+    ]
+
+
+def test_fetch_latest_relevant_product_found():
+    """直近7日以内の発売商品が正しく取得できる"""
+    today = datetime(2026, 3, 14)
+    html = _make_products_html([("「ニンジャスピナー」", "2026年 3月13日（金）")])
+    with patch("blog_markdown.request.urlopen", return_value=_mock_urlopen(html)):
+        result = fetch_latest_relevant_product(today)
+    assert result is not None
+    name, sale_date = result
+    assert name == "ニンジャスピナー"
+    assert sale_date == datetime(2026, 3, 13)
+
+
+def test_fetch_latest_relevant_product_too_old():
+    """8日以上前の発売商品はNoneを返す"""
+    today = datetime(2026, 3, 14)
+    html = _make_products_html([("「ニンジャスピナー」", "2026年 3月 5日（木）")])
+    with patch("blog_markdown.request.urlopen", return_value=_mock_urlopen(html)):
+        result = fetch_latest_relevant_product(today)
+    assert result is None
+
+
+def test_fetch_latest_relevant_product_future_skipped():
+    """未発売商品はスキップされ、発売済みの最新商品が選ばれる"""
+    today = datetime(2026, 3, 14)
+    html = _make_products_html(
+        [
+            ("「未来のカード」", "2026年 3月20日（金）"),
+            ("「ニンジャスピナー」", "2026年 3月13日（金）"),
+        ]
+    )
+    with patch("blog_markdown.request.urlopen", return_value=_mock_urlopen(html)):
+        result = fetch_latest_relevant_product(today)
+    assert result is not None
+    assert result[0] == "ニンジャスピナー"
+
+
+def test_fetch_recent_relevant_products_multiple_found():
+    """直近7日以内に複数商品がある場合は複数返す"""
+    today = datetime(2026, 3, 14)
+    html = _make_products_html(
+        [
+            ("「ニンジャスピナー」", "2026年 3月13日（金）"),
+            ("「スターターセットMEGA メガゲンガーex」", "2026年 3月12日（木）"),
+            ("「古いカード」", "2026年 3月 1日（日）"),
+        ]
+    )
+    with patch("blog_markdown.request.urlopen", return_value=_mock_urlopen(html)):
+        result = fetch_recent_relevant_products(today)
+    assert result == [
+        ("ニンジャスピナー", datetime(2026, 3, 13)),
+        ("スターターセットMEGA メガゲンガーex", datetime(2026, 3, 12)),
+    ]
+
+
+def test_fetch_latest_relevant_product_network_error():
+    """ネットワークエラー時はNoneを返す"""
+    today = datetime(2026, 3, 14)
+    with patch("blog_markdown.request.urlopen", side_effect=OSError("network error")):
+        result = fetch_latest_relevant_product(today)
+    assert result is None
+
+
+@patch("blog_markdown.fetch_recent_relevant_products", return_value=[])
+def test_build_diff_markdown_intro_no_product(mock_fetch):
+    """直近商品がない場合は「今週」イントロになる"""
+    report = {
+        "summary": {
+            "total_old": 1,
+            "total_new": 1,
+            "added": 0,
+            "removed": 0,
+            "modified": 1,
+        },
+        "added": [],
+        "removed": [],
+        "modified": [
+            {
+                "question_hash": "h",
+                "question": "Q",
+                "old_answer": "old",
+                "new_answer": "new",
+            }
+        ],
+    }
+    markdown = build_diff_markdown(report)
+    assert "今週" in markdown
+
+
+@patch(
+    "blog_markdown.fetch_recent_relevant_products",
+    return_value=[("ニンジャスピナー", datetime(2026, 3, 13))],
+)
+def test_build_diff_markdown_intro_with_product(mock_fetch):
+    """直近商品がある場合は商品名と発売日がイントロに入る"""
+    report = {
+        "summary": {
+            "total_old": 1,
+            "total_new": 1,
+            "added": 0,
+            "removed": 0,
+            "modified": 1,
+        },
+        "added": [],
+        "removed": [],
+        "modified": [
+            {
+                "question_hash": "h",
+                "question": "Q",
+                "old_answer": "old",
+                "new_answer": "new",
+            }
+        ],
+    }
+    markdown = build_diff_markdown(report)
+    assert "「ニンジャスピナー」" in markdown
+    assert "3月13日" in markdown
+
+
+@patch(
+    "blog_markdown.fetch_recent_relevant_products",
+    return_value=[
+        ("ニンジャスピナー", datetime(2026, 3, 13)),
+        ("スターターセットMEGA メガゲンガーex", datetime(2026, 3, 12)),
+    ],
+)
+def test_build_diff_markdown_intro_with_multiple_products(mock_fetch):
+    """直近商品が複数ある場合は複数商品名がイントロに入る"""
+    report = {
+        "summary": {
+            "total_old": 1,
+            "total_new": 1,
+            "added": 0,
+            "removed": 0,
+            "modified": 1,
+        },
+        "added": [],
+        "removed": [],
+        "modified": [
+            {
+                "question_hash": "h",
+                "question": "Q",
+                "old_answer": "old",
+                "new_answer": "new",
+            }
+        ],
+    }
+    markdown = build_diff_markdown(report)
+    assert "「ニンジャスピナー」" in markdown
+    assert "「スターターセットMEGA メガゲンガーex」" in markdown
+
+    """追加削除がなくても変更があれば差分あり"""
+    report = {
+        "summary": {
+            "total_old": 1,
+            "total_new": 1,
+            "added": 0,
+            "removed": 0,
+            "modified": 1,
+        }
+    }
+    assert has_diff(report) is True
+
+
+@patch("blog_markdown.fetch_recent_relevant_products", return_value=[])
+def test_build_diff_markdown_contains_sections(mock_fetch):
+    """差分Markdownに主要セクションが含まれる"""
+    report = {
+        "summary": {
+            "total_old": 2,
+            "total_new": 3,
+            "added": 1,
+            "removed": 0,
+            "modified": 1,
+        },
+        "added": [
+            {
+                "question_hash": "hash-new",
+                "question": "Q_new",
+                "answer": "A_new",
+            }
+        ],
+        "removed": [],
+        "modified": [
+            {
+                "question_hash": "hash-mod",
+                "question": "Q_mod",
+                "old_answer": "A_old",
+                "new_answer": "A_new",
+            }
+        ],
+    }
+
+    markdown = build_diff_markdown(report)
+
+    assert "## 更新サマリ" in markdown
+    assert "## 削除されたQ&A" in markdown
+    assert "## 追加されたQ&A" in markdown
+    assert "## 変更されたQ&A" in markdown
+    assert "Q: Q_new" in markdown
+    assert "**変更前**" in markdown
+    assert "**変更後**" in markdown
+    assert "#ポケカ" in markdown

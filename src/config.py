@@ -4,6 +4,8 @@
 BASE_URL = "https://www.pokemon-card.com/rules/faq/search.php?freeword=&regulation_faq_main_item1=all"
 OUTPUT_FILE = "faq_data.json"
 DIFF_REPORT_FILE = "diff_report.json"
+BLOG_MARKDOWN_FILE = "blog_post.md"
+DIFF_MARKDOWN_FILE = BLOG_MARKDOWN_FILE
 
 # リトライ設定
 MAX_RETRIES = 3
