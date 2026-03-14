@@ -1,7 +1,7 @@
 """設定ファイル"""
 
 # スクレイピング設定
-BASE_URL = "https://www.pokemon-card.com/rules/faq/search.php"
+BASE_URL = "https://www.pokemon-card.com/rules/faq/search.php?freeword=&regulation_faq_main_item1=all"
 OUTPUT_FILE = "faq_data.json"
 DIFF_REPORT_FILE = "diff_report.json"
 
