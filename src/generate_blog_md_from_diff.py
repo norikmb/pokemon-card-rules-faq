@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 import config
-from note_publisher import has_diff, post_diff_to_note
+from blog_markdown import generate_blog_markdown, has_diff
 
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL),
@@ -15,15 +15,15 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     diff_path = Path(config.DIFF_REPORT_FILE)
     if not diff_path.exists():
-        logger.info("差分レポートが存在しないため、note投稿をスキップします")
+        logger.info("差分レポートが存在しないため、Markdown生成をスキップします")
         return
 
     report = json.loads(diff_path.read_text(encoding="utf-8"))
     if not has_diff(report):
-        logger.info("差分がないため、note投稿をスキップします")
+        logger.info("差分がないため、Markdown生成をスキップします")
         return
 
-    post_diff_to_note(report)
+    generate_blog_markdown(report)
 
 
 if __name__ == "__main__":

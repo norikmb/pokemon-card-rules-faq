@@ -13,7 +13,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from bs4 import BeautifulSoup
 
 import config
-from note_publisher import has_diff, post_diff_to_note
+from blog_markdown import generate_blog_markdown, has_diff
 
 # ログ設定
 logging.basicConfig(
@@ -279,9 +279,11 @@ def main():
 
         if has_diff(diff_report):
             try:
-                post_diff_to_note(diff_report)
+                generate_blog_markdown(diff_report)
             except Exception as e:
-                logger.warning(f"note投稿に失敗しましたが処理は継続します: {e}")
+                logger.warning(
+                    f"ブログ用Markdown生成に失敗しましたが処理は継続します: {e}"
+                )
 
         # データ保存
         Path(config.OUTPUT_FILE).write_text(

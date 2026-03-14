@@ -41,8 +41,8 @@ jobs:
           git config --local user.name "マシンユーザー"
           git config --local user.email "machine-user@example.com"
           git add faq_data.json diff_report.json
-          if [ -f diff_report.md ]; then
-            git add diff_report.md
+          if [ -f blog_post.md ]; then
+            git add blog_post.md
           fi
           if git diff --staged --quiet; then
             echo "has_changes=false" >> $GITHUB_OUTPUT
@@ -77,14 +77,6 @@ jobs:
           else
             echo "FAQ更新" > pr_body.txt
           fi
-
-      - name: Upload diff artifact
-        if: steps.check_changes.outputs.has_changes == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: faq-diff-report
-          path: diff_report.json
-          if-no-files-found: error
 
       - name: Create Pull Request
         id: create_pr
@@ -148,39 +140,3 @@ jobs:
         if: steps.check_changes.outputs.has_changes == 'false'
         run: |
           echo "ℹ️ 前回から変更はありませんでした"
-
-  post_note:
-    needs: update_faq
-    if: needs.update_faq.outputs.has_changes == 'true'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-          architecture: "x64"
-
-      - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Install dependencies
-        run: uv sync
-
-      - name: Download diff artifact
-        uses: actions/download-artifact@v5
-        with:
-          name: faq-diff-report
-          path: .
-
-      - name: Post diff to note
-        run: uv run python src/post_note_from_diff.py
-        env:
-          NOTE_AUTO_POST: ${{ secrets.NOTE_AUTO_POST }}
-          NOTE_COOKIE: ${{ secrets.NOTE_COOKIE }}
-          NOTE_USERNAME: ${{ secrets.NOTE_USERNAME }}

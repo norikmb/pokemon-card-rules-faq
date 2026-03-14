@@ -2,7 +2,6 @@ import json
 import logging
 import re
 from datetime import datetime
-from html import escape
 from pathlib import Path
 from urllib import request
 
@@ -11,10 +10,20 @@ from bs4 import BeautifulSoup
 import config
 
 PRODUCTS_URL = "https://www.pokemon-card.com/products/index.html"
+PRODUCTS_TOP_LIST_API_URL = "https://www.pokemon-card.com/products/topList.php"
 # 発売日がこの日数以内なら「直近」とみなす
 RECENT_DAYS_THRESHOLD = 7
 
 logger = logging.getLogger(__name__)
+
+
+def product_type_priority(product_type: str) -> int:
+    """商品種別の優先度（小さいほど優先）。"""
+    priorities = {
+        "拡張パック": 0,
+        "構築デッキ": 1,
+    }
+    return priorities.get(product_type, 99)
 
 
 def has_diff(report: dict) -> bool:
@@ -33,11 +42,73 @@ def fetch_recent_relevant_products(
     if today is None:
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # 1) 公式API(JSON)から取得（最優先）
     try:
-        req = request.Request(
-            PRODUCTS_URL,
-            headers={"User-Agent": config.NOTE_USER_AGENT},
+        req = request.Request(PRODUCTS_TOP_LIST_API_URL)
+        with request.urlopen(req, timeout=config.REQUEST_TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+        products = payload.get("products", [])
+        date_re = re.compile(r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日")
+
+        api_candidates: list[tuple[str, datetime, str]] = []
+        for product in products:
+            product_type = str(product.get("productType", "")).strip()
+            if product_type not in {"拡張パック", "構築デッキ"}:
+                continue
+
+            title = str(product.get("productTitle", "")).strip()
+            release_date_text = str(product.get("releaseDate", ""))
+            date_m = date_re.search(release_date_text)
+            if not date_m:
+                continue
+
+            year, month, day = (
+                int(date_m.group(1)),
+                int(date_m.group(2)),
+                int(date_m.group(3)),
+            )
+            try:
+                sale_date = datetime(year, month, day)
+            except ValueError:
+                continue
+
+            if sale_date > today:
+                continue
+            if (today - sale_date).days > RECENT_DAYS_THRESHOLD:
+                continue
+
+            quoted = re.findall(r"「([^」]+)」", title)
+            if quoted:
+                name = quoted[-1]
+            else:
+                name = re.sub(r"^\s*(拡張パック|構築デッキ)\s*", "", title).strip()
+
+            if name:
+                api_candidates.append((name, sale_date, product_type))
+
+        if api_candidates:
+            api_candidates.sort(
+                key=lambda x: (-x[1].toordinal(), product_type_priority(x[2]), x[0])
+            )
+            unique_candidates: list[tuple[str, datetime]] = []
+            seen: set[tuple[str, datetime]] = set()
+            for name, sale_date, _product_type in api_candidates:
+                candidate = (name, sale_date)
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                unique_candidates.append(candidate)
+            return unique_candidates
+
+    except Exception as e:
+        logger.warning(
+            "商品APIの取得に失敗したためHTML解析へフォールバックします: %s", e
         )
+
+    # 2) フォールバック: HTML解析
+    try:
+        req = request.Request(PRODUCTS_URL)
         with request.urlopen(req, timeout=config.REQUEST_TIMEOUT) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except Exception as e:
@@ -49,7 +120,7 @@ def fetch_recent_relevant_products(
     sale_label_re = re.compile(r"(拡張パック|構築デッキ)販売日")
     date_re = re.compile(r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日")
 
-    candidates: list[tuple[str, datetime]] = []
+    candidates: list[tuple[str, datetime, str]] = []
 
     for node in soup.find_all(string=sale_label_re):
         # テキストノード → 親要素 → 祖父要素の順で広いコンテキストを用意
@@ -100,23 +171,35 @@ def fetch_recent_relevant_products(
             tokens = [t for t in re.split(r"\s+", before) if t]
             name = tokens[-1] if tokens else ""
 
+        product_type = ""
+        for ctx in contexts:
+            if "拡張パック" in ctx:
+                product_type = "拡張パック"
+                break
+            if "構築デッキ" in ctx:
+                product_type = "構築デッキ"
+                break
+
         if name:
-            candidates.append((name, sale_date))
+            candidates.append((name, sale_date, product_type))
 
     if not candidates:
         return []
 
-    candidates.sort(key=lambda x: x[1], reverse=True)
+    candidates.sort(
+        key=lambda x: (-x[1].toordinal(), product_type_priority(x[2]), x[0])
+    )
     filtered_candidates = [
-        (name, sale_date)
-        for name, sale_date in candidates
+        (name, sale_date, product_type)
+        for name, sale_date, product_type in candidates
         if (today - sale_date).days <= RECENT_DAYS_THRESHOLD
     ]
 
     # 同一商品の重複を除去しつつ順序は保持
     unique_candidates: list[tuple[str, datetime]] = []
     seen: set[tuple[str, datetime]] = set()
-    for candidate in filtered_candidates:
+    for name, sale_date, _product_type in filtered_candidates:
+        candidate = (name, sale_date)
         if candidate in seen:
             continue
         seen.add(candidate)
@@ -136,6 +219,7 @@ def fetch_latest_relevant_product(
 def build_diff_markdown(report: dict) -> str:
     """差分レポートをMarkdownに変換"""
     summary = report["summary"]
+    title_date = datetime.now().strftime("%Y/%m/%d")
 
     product_infos = fetch_recent_relevant_products()
     if product_infos:
@@ -148,6 +232,8 @@ def build_diff_markdown(report: dict) -> str:
         intro = "今週更新されたQ&Aをまとめています。"
 
     lines = [
+        f"# {title_date} ポケモンカードQ&Aサイレント修正一覧",
+        "",
         intro,
         "",
         "## 更新サマリ",
@@ -211,141 +297,19 @@ def build_diff_markdown(report: dict) -> str:
 
 
 def save_diff_markdown(markdown_text: str) -> None:
-    """差分Markdownをファイルに保存"""
+    """ブログ用Markdownをファイルに保存"""
     try:
-        Path(config.DIFF_MARKDOWN_FILE).write_text(markdown_text, encoding="utf-8")
-        logger.info(f"差分Markdownを保存: {config.DIFF_MARKDOWN_FILE}")
+        Path(config.BLOG_MARKDOWN_FILE).write_text(markdown_text, encoding="utf-8")
+        logger.info(f"ブログ用Markdownを保存: {config.BLOG_MARKDOWN_FILE}")
     except Exception as e:
-        logger.error(f"差分Markdownの保存に失敗: {e}")
+        logger.error(f"ブログ用Markdownの保存に失敗: {e}")
 
 
-def markdown_to_html(markdown_text: str) -> str:
-    """簡易Markdown→HTML変換（note投稿用）"""
-    html_lines: list[str] = []
-    in_code_block = False
-    in_list = False
-
-    for line in markdown_text.splitlines():
-        stripped = line.strip()
-
-        if stripped == "```":
-            if in_list:
-                html_lines.append("</ul>")
-                in_list = False
-            html_lines.append("<pre><code>" if not in_code_block else "</code></pre>")
-            in_code_block = not in_code_block
-            continue
-
-        if in_code_block:
-            html_lines.append(escape(line))
-            continue
-
-        if not stripped:
-            if in_list:
-                html_lines.append("</ul>")
-                in_list = False
-            continue
-
-        if stripped.startswith("### "):
-            if in_list:
-                html_lines.append("</ul>")
-                in_list = False
-            html_lines.append(f"<h3>{escape(stripped[4:])}</h3>")
-        elif stripped.startswith("## "):
-            if in_list:
-                html_lines.append("</ul>")
-                in_list = False
-            html_lines.append(f"<h2>{escape(stripped[3:])}</h2>")
-        elif stripped.startswith("# "):
-            if in_list:
-                html_lines.append("</ul>")
-                in_list = False
-            html_lines.append(f"<h1>{escape(stripped[2:])}</h1>")
-        elif stripped.startswith("- "):
-            if not in_list:
-                html_lines.append("<ul>")
-                in_list = True
-            html_lines.append(f"<li>{escape(stripped[2:])}</li>")
-        else:
-            if in_list:
-                html_lines.append("</ul>")
-                in_list = False
-            html_lines.append(f"<p>{escape(stripped)}</p>")
-
-    if in_list:
-        html_lines.append("</ul>")
-
-    return "\n".join(html_lines)
-
-
-def create_note_draft(title: str, html_body: str) -> tuple[int, str]:
-    """note下書きを作成してID/キーを返す"""
-    url = f"{config.NOTE_API_BASE_URL}/api/v1/text_notes"
-    payload = {
-        "name": title,
-        "body": html_body,
-        "template_key": None,
-    }
-    req = request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": config.NOTE_USER_AGENT,
-            "Cookie": config.NOTE_COOKIE,
-        },
-    )
-
-    with request.urlopen(req, timeout=config.REQUEST_TIMEOUT) as response:
-        response_data = json.loads(response.read().decode("utf-8"))
-
-    data = response_data["data"]
-    return data["id"], data["key"]
-
-
-def update_note_draft(note_id: int, title: str, html_body: str) -> None:
-    """note下書きを更新"""
-    url = f"{config.NOTE_API_BASE_URL}/api/v1/text_notes/{note_id}"
-    payload = {
-        "name": title,
-        "body": html_body,
-        "status": "draft",
-    }
-    req = request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        method="PUT",
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": config.NOTE_USER_AGENT,
-            "Cookie": config.NOTE_COOKIE,
-        },
-    )
-
-    with request.urlopen(req, timeout=config.REQUEST_TIMEOUT):
-        return
-
-
-def post_diff_to_note(report: dict) -> None:
-    """差分をnoteに下書き投稿"""
-    if not config.NOTE_AUTO_POST:
-        logger.info("note自動投稿は無効です")
-        return
-
-    if not config.NOTE_COOKIE:
-        logger.warning("NOTE_COOKIE が未設定のためnote投稿をスキップします")
-        return
+def generate_blog_markdown(report: dict) -> None:
+    """差分のブログ用Markdownを生成して保存する。"""
 
     markdown_text = build_diff_markdown(report)
     save_diff_markdown(markdown_text)
-    html_body = markdown_to_html(markdown_text)
     title = f"{datetime.now().strftime('%Y/%m/%d')} ポケモンカードQ&Aサイレント修正一覧"
-
-    note_id, note_key = create_note_draft(title=title, html_body=html_body)
-    update_note_draft(note_id=note_id, title=title, html_body=html_body)
-    if config.NOTE_USERNAME:
-        note_url = f"{config.NOTE_API_BASE_URL}/{config.NOTE_USERNAME}/n/{note_key}"
-    else:
-        note_url = f"{config.NOTE_API_BASE_URL}/n/{note_key}"
-    logger.info(f"note下書き投稿が完了しました: {note_url}")
+    logger.info("ブログ用Markdownを生成しました: %s", config.BLOG_MARKDOWN_FILE)
+    logger.info("ブログタイトル案: %s", title)

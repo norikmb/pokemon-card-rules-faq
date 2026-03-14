@@ -1,11 +1,18 @@
 """スクレイピング機能のテスト"""
 
+import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 from bs4 import BeautifulSoup
 
+from blog_markdown import (
+    build_diff_markdown,
+    fetch_latest_relevant_product,
+    fetch_recent_relevant_products,
+    has_diff,
+)
 from main import (
     Faq,
     ScraperError,
@@ -13,12 +20,6 @@ from main import (
     generate_diff_report,
     get_total_pages,
     is_busy_page,
-)
-from note_publisher import (
-    build_diff_markdown,
-    fetch_latest_relevant_product,
-    fetch_recent_relevant_products,
-    has_diff,
 )
 from tests.fixtures.sample_html import SAMPLE_FAQ_LIST_HTML
 
@@ -196,11 +197,47 @@ def _mock_urlopen(html_bytes: bytes) -> MagicMock:
     return mock_resp
 
 
+def test_fetch_recent_relevant_products_from_top_list_api_json():
+    """topList.php(JSON)から直近の拡張パック/構築デッキを取得できる"""
+    today = datetime(2026, 3, 14)
+    payload = {
+        "result": 1,
+        "products": [
+            {
+                "productTitle": "拡張パック 「ニンジャスピナー」",
+                "productType": "拡張パック",
+                "releaseDate": "2026年 3月13日（金）",
+            },
+            {
+                "productTitle": "スターターセットMEGA メガゲンガーex",
+                "productType": "構築デッキ",
+                "releaseDate": "2026年 3月12日（木）",
+            },
+            {
+                "productTitle": "カードイラストフィギュアコレクション",
+                "productType": "その他の商品",
+                "releaseDate": "2026年 3月13日（金）",
+            },
+        ],
+    }
+    response_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    with patch(
+        "blog_markdown.request.urlopen",
+        return_value=_mock_urlopen(response_bytes),
+    ):
+        result = fetch_recent_relevant_products(today)
+
+    assert result == [
+        ("ニンジャスピナー", datetime(2026, 3, 13)),
+        ("スターターセットMEGA メガゲンガーex", datetime(2026, 3, 12)),
+    ]
+
+
 def test_fetch_latest_relevant_product_found():
     """直近7日以内の発売商品が正しく取得できる"""
     today = datetime(2026, 3, 14)
     html = _make_products_html([("「ニンジャスピナー」", "2026年 3月13日（金）")])
-    with patch("note_publisher.request.urlopen", return_value=_mock_urlopen(html)):
+    with patch("blog_markdown.request.urlopen", return_value=_mock_urlopen(html)):
         result = fetch_latest_relevant_product(today)
     assert result is not None
     name, sale_date = result
@@ -212,7 +249,7 @@ def test_fetch_latest_relevant_product_too_old():
     """8日以上前の発売商品はNoneを返す"""
     today = datetime(2026, 3, 14)
     html = _make_products_html([("「ニンジャスピナー」", "2026年 3月 5日（木）")])
-    with patch("note_publisher.request.urlopen", return_value=_mock_urlopen(html)):
+    with patch("blog_markdown.request.urlopen", return_value=_mock_urlopen(html)):
         result = fetch_latest_relevant_product(today)
     assert result is None
 
@@ -226,7 +263,7 @@ def test_fetch_latest_relevant_product_future_skipped():
             ("「ニンジャスピナー」", "2026年 3月13日（金）"),
         ]
     )
-    with patch("note_publisher.request.urlopen", return_value=_mock_urlopen(html)):
+    with patch("blog_markdown.request.urlopen", return_value=_mock_urlopen(html)):
         result = fetch_latest_relevant_product(today)
     assert result is not None
     assert result[0] == "ニンジャスピナー"
@@ -242,7 +279,7 @@ def test_fetch_recent_relevant_products_multiple_found():
             ("「古いカード」", "2026年 3月 1日（日）"),
         ]
     )
-    with patch("note_publisher.request.urlopen", return_value=_mock_urlopen(html)):
+    with patch("blog_markdown.request.urlopen", return_value=_mock_urlopen(html)):
         result = fetch_recent_relevant_products(today)
     assert result == [
         ("ニンジャスピナー", datetime(2026, 3, 13)),
@@ -253,12 +290,12 @@ def test_fetch_recent_relevant_products_multiple_found():
 def test_fetch_latest_relevant_product_network_error():
     """ネットワークエラー時はNoneを返す"""
     today = datetime(2026, 3, 14)
-    with patch("note_publisher.request.urlopen", side_effect=OSError("network error")):
+    with patch("blog_markdown.request.urlopen", side_effect=OSError("network error")):
         result = fetch_latest_relevant_product(today)
     assert result is None
 
 
-@patch("note_publisher.fetch_latest_relevant_product", return_value=None)
+@patch("blog_markdown.fetch_recent_relevant_products", return_value=[])
 def test_build_diff_markdown_intro_no_product(mock_fetch):
     """直近商品がない場合は「今週」イントロになる"""
     report = {
@@ -285,7 +322,7 @@ def test_build_diff_markdown_intro_no_product(mock_fetch):
 
 
 @patch(
-    "note_publisher.fetch_recent_relevant_products",
+    "blog_markdown.fetch_recent_relevant_products",
     return_value=[("ニンジャスピナー", datetime(2026, 3, 13))],
 )
 def test_build_diff_markdown_intro_with_product(mock_fetch):
@@ -315,7 +352,7 @@ def test_build_diff_markdown_intro_with_product(mock_fetch):
 
 
 @patch(
-    "note_publisher.fetch_recent_relevant_products",
+    "blog_markdown.fetch_recent_relevant_products",
     return_value=[
         ("ニンジャスピナー", datetime(2026, 3, 13)),
         ("スターターセットMEGA メガゲンガーex", datetime(2026, 3, 12)),
@@ -359,7 +396,7 @@ def test_build_diff_markdown_intro_with_multiple_products(mock_fetch):
     assert has_diff(report) is True
 
 
-@patch("note_publisher.fetch_latest_relevant_product", return_value=None)
+@patch("blog_markdown.fetch_recent_relevant_products", return_value=[])
 def test_build_diff_markdown_contains_sections(mock_fetch):
     """差分Markdownに主要セクションが含まれる"""
     report = {
