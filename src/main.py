@@ -13,6 +13,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from bs4 import BeautifulSoup
 
 import config
+from note_publisher import has_diff, post_diff_to_note
 
 # ログ設定
 logging.basicConfig(
@@ -276,6 +277,12 @@ def main():
         diff_report = generate_diff_report(old_data, new_data)
         save_diff_report(diff_report)
 
+        if has_diff(diff_report):
+            try:
+                post_diff_to_note(diff_report)
+            except Exception as e:
+                logger.warning(f"note投稿に失敗しましたが処理は継続します: {e}")
+
         # データ保存
         Path(config.OUTPUT_FILE).write_text(
             json.dumps(new_data, ensure_ascii=False, indent=4),
@@ -286,7 +293,7 @@ def main():
         logger.info("FAQ更新処理が正常に完了しました")
 
         # 変更があった場合のみ終了コード0
-        if diff_report["summary"]["added"] > 0 or diff_report["summary"]["removed"] > 0:
+        if has_diff(diff_report):
             logger.info("変更が検出されました")
         else:
             logger.info("変更はありませんでした")
