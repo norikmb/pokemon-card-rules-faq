@@ -62,6 +62,9 @@ ignore = [
     "E501",  # line too long
 ]
 
+[tool.uv]
+exclude-newer = "1 week"
+
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
